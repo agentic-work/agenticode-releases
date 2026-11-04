@@ -186,6 +186,13 @@ detect_os() {
     esac
 }
 
+# musl libc (Alpine and friends) runs only the -musl build
+is_musl() {
+    [ "$OS" = linux ] || return 1
+    for _l in /lib/ld-musl-*.so.1 /usr/lib/ld-musl-*.so.1; do [ -e "$_l" ] && return 0; done
+    ldd --version 2>&1 | grep -qi musl
+}
+
 detect_arch() {
     uname_m=$(uname -m 2>/dev/null || printf 'unknown')
     case "$uname_m" in
@@ -341,6 +348,7 @@ main() {
     OS=$(detect_os)
     ARCH=$(detect_arch)
     ASSET="$BIN_NAME-$OS-$ARCH"
+    if is_musl; then ASSET="$ASSET-musl"; fi
     PREFIX=$(pick_prefix)
     DEST="$PREFIX/$BIN_NAME"
 
@@ -407,6 +415,13 @@ main() {
     STAGE=''
 
     printf '\n%sInstalled agenticode %s%s — %s\n' "$C_B" "$VERSION" "$C_0" "$DEST"
+
+    # Bun's musl runtime links the C++ runtime, which Alpine leaves out by default
+    if is_musl && ! { [ -e /usr/lib/libstdc++.so.6 ] || [ -e /lib/libstdc++.so.6 ]; }; then
+        printf '\n'
+        warn 'agenticode needs the C++ runtime on this system. Install it with:'
+        printf '\n    apk add libstdc++ libgcc     (as root, or with sudo / doas)\n'
+    fi
 
     case ":${PATH:-}:" in
         *":$PREFIX:"*) ;;
