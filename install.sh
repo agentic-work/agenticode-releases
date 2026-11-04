@@ -299,6 +299,30 @@ sha256_of() {
 # inside a command substitution `die` only kills the subshell, which makes
 # failure modes here hard to reason about.
 EXPECTED=''
+# Brainbow, agenticode's built-in browser and desktop control, ships with
+# each release (agenticode-brainbow.tar.gz) and lives in ~/.agenticode/brainbow.
+# Verified like the binary. Not fatal: agenticode also fetches it itself on
+# first start, and older releases do not carry it.
+install_brainbow() {
+    _bb=agenticode-brainbow.tar.gz
+    _sums="$TMP_DIR/checksums.txt"
+    _want=$(awk -v n="$_bb" '$2 == n || $2 == "*" n { print $1; exit }' "$_sums" 2>/dev/null)
+    printf '%s' "$_want" | grep -Eq '^[0-9a-fA-F]{64}$' || return 0
+    try_fetch "$BASE/$TAG/$_bb" "$TMP_DIR/$_bb" || { warn 'could not download Brainbow; agenticode will fetch it on first start'; return 0; }
+    if [ "$(sha256_of "$TMP_DIR/$_bb")" != "$_want" ]; then
+        warn 'Brainbow download did not match its checksum; skipped (agenticode will fetch it on first start)'
+        return 0
+    fi
+    _home="${HOME:?}/.agenticode"
+    mkdir -p "$_home" && rm -rf "$_home/.brainbow.new" && mkdir -p "$_home/.brainbow.new" \
+        && tar -xzf "$TMP_DIR/$_bb" -C "$_home/.brainbow.new" \
+        && [ -f "$_home/.brainbow.new/brainbow/src/mcp-server.js" ] \
+        && rm -rf "$_home/brainbow" && mv "$_home/.brainbow.new/brainbow" "$_home/brainbow" \
+        && rm -rf "$_home/.brainbow.new" \
+        && info "Brainbow $(cut -c1-12 "$_home/brainbow/.ref" 2>/dev/null) — $_home/brainbow" \
+        || { rm -rf "$_home/.brainbow.new"; warn 'could not unpack Brainbow; agenticode will fetch it on first start'; }
+}
+
 expected_sha() {
     _asset="$1"; _tag="$2"
 
@@ -415,6 +439,8 @@ main() {
     STAGE=''
 
     printf '\n%sInstalled agenticode %s%s — %s\n' "$C_B" "$VERSION" "$C_0" "$DEST"
+
+    install_brainbow
 
     # Bun's musl runtime links the C++ runtime, which Alpine leaves out by default
     if is_musl && ! { [ -e /usr/lib/libstdc++.so.6 ] || [ -e /lib/libstdc++.so.6 ]; }; then
