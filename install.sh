@@ -303,6 +303,33 @@ EXPECTED=''
 # each release (agenticode-brainbow.tar.gz) and lives in ~/.agenticode/brainbow.
 # Verified like the binary. Not fatal: agenticode also fetches it itself on
 # first start, and older releases do not carry it.
+# Endpoint mode: remember the endpoint root this came from (the same value as
+# AGENTICODE_INSTALL_BASE, e.g. https://chat.example/dl; no query, no
+# credentials) in ~/.agenticode/install-base, so agenticode's self-update and
+# Brainbow sync use {root}/agenticode/... and never the public release repo.
+# Only after a verified install, never the unstamped sentinel, user-only (0600).
+record_install_base() {
+    _root="${1:-}"
+    [ -n "$_root" ] || return 0
+    case "$_root" in *__AGENTICODE_ENDPOINT__*) return 0 ;; esac
+    case "$_root" in *'?'*|*'#'*|*' '*) return 0 ;; esac
+    case "$_root" in
+        https://*|http://localhost|http://localhost:*|http://localhost/*|http://127.0.0.1|http://127.0.0.1:*|http://127.0.0.1/*) ;;
+        *) return 0 ;;
+    esac
+    _hostpart=$(printf '%s' "$_root" | sed 's#^[a-z]*://##; s#/.*##')
+    case "$_hostpart" in *@*|'') return 0 ;; esac
+    _root=$(printf '%s' "$_root" | sed 's#/*$##')
+    _home="${HOME:?}/.agenticode"
+    if mkdir -p "$_home" && (umask 077 && printf '%s\n' "$_root" > "$_home/install-base.new") \
+        && chmod 600 "$_home/install-base.new" && mv -f "$_home/install-base.new" "$_home/install-base"; then
+        info "updates from $_root"
+    else
+        rm -f "$_home/install-base.new"
+        warn 'could not record the install endpoint; agenticode will update from its default source'
+    fi
+}
+
 install_brainbow() {
     _bb=agenticode-brainbow.tar.gz
     _sums="$TMP_DIR/checksums.txt"
@@ -441,6 +468,7 @@ main() {
     printf '\n%sInstalled agenticode %s%s — %s\n' "$C_B" "$VERSION" "$C_0" "$DEST"
 
     install_brainbow
+    record_install_base "${AGENTICODE_INSTALL_BASE:-}"
 
     # Bun's musl runtime links the C++ runtime, which Alpine leaves out by default
     if is_musl && ! { [ -e /usr/lib/libstdc++.so.6 ] || [ -e /lib/libstdc++.so.6 ]; }; then
@@ -473,7 +501,7 @@ main() {
     printf '\nNext:\n'
     printf '  agenticode --version\n'
     printf '  agenticode login\n'
-    printf '  agenticode doctor\n'
+    printf '  agenticode health\n'
 }
 
 main "$@"

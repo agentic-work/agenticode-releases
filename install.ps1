@@ -250,6 +250,44 @@ function Add-ToUserPath {
   }
 }
 
+# Endpoint mode: remember the endpoint root this came from (the same value as
+# AGENTICODE_INSTALL_BASE, e.g. https://chat.example/dl; no query, no
+# credentials) in ~/.agenticode/install-base, readable by this user only, so
+# agenticode's self-update and Brainbow sync use {root}/agenticode/... and
+# never the public release repo.
+function Save-InstallBase {
+  param([string]$Root)
+  if (-not $Root -or $Root -like '*__AGENTICODE_ENDPOINT__*') { return }
+  try { $u = [Uri]$Root } catch { return }
+  if ($u.UserInfo -or $u.Query -or $u.Fragment) { return }
+  $ok = $u.Scheme -eq 'https' -or ($u.Scheme -eq 'http' -and ($u.Host -eq 'localhost' -or $u.Host -eq '127.0.0.1'))
+  if (-not $ok) { return }
+  $root = $Root.TrimEnd('/')
+  try {
+    $dir = Join-Path $HOME '.agenticode'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $file = Join-Path $dir 'install-base'
+    Set-Content -LiteralPath $file -Value $root -NoNewline -Encoding ascii
+    $onWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows
+    if ($onWindows) {
+      $acl = Get-Acl -LiteralPath $file
+      $acl.SetAccessRuleProtection($true, $false)
+      $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+      $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'FullControl', 'Allow')))
+      Set-Acl -LiteralPath $file -AclObject $acl
+    } else {
+      try {
+        [System.IO.File]::SetUnixFileMode($file, [System.IO.UnixFileMode]'UserRead, UserWrite')
+      } catch {
+        & chmod 600 -- $file
+      }
+    }
+    Write-Host "updates from $root"
+  } catch {
+    Write-Warn 'could not record the install endpoint; agenticode will update from its default source'
+  }
+}
+
 # ===========================================================================
 # main
 # ===========================================================================
@@ -377,6 +415,7 @@ try {
 
   Write-Host ''
   Write-Host "Installed agenticode $VERSION — $DEST"
+  Save-InstallBase -Root $env:AGENTICODE_INSTALL_BASE
 
   if (Add-ToUserPath -Dir $PREFIX) {
     Write-Host "Added $PREFIX to your user PATH (open a new terminal to pick it up)."
@@ -389,7 +428,7 @@ try {
   Write-Host 'Next:'
   Write-Host '  agenticode --version'
   Write-Host '  agenticode login'
-  Write-Host '  agenticode doctor'
+  Write-Host '  agenticode health'
 }
 finally {
   Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
